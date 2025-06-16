@@ -1,0 +1,26 @@
+# Python 虛擬環境
+venv/
+.venv/
+
+# PyInstaller 構建文件和輸出
+__pycache__/
+build/
+dist/
+*.spec
+
+# Python 運行時生成的檔案
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+
+# IDE 特定文件 (例如 VS Code)
+.vscode/
+
+# 您的 config.json (如果您選擇不將其納入版本控制，則取消註釋)
+# config.json
+
+# 作業系統特定文件
+.DS_Store
+Thumbs.db
