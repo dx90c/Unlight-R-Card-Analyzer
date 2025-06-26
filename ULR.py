@@ -1,28 +1,27 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, Toplevel
 import pandas as pd
-import itertools # 用於產生所有R卡組合
-from io import StringIO # 用於從字串讀取CSV數據
-import math # 用於計算向上取整
-import json # 用於設定持久化儲存
-import os # 用於檢查檔案是否存在
+import itertools
+from io import StringIO
+import math
+import json
+from pathlib import Path  # 現代化的路徑處理
+from typing import Dict, List, Tuple, Optional, Any # 用於型別提示
 
-# --- 全域變數或常數設定 ---
-# 碎片名稱 (從提供的CSV標頭直接獲取)
-FRAGMENT_NAMES = ["記憶的碎片", "時間的碎片", "靈魂的碎片", "生命的碎片", "死亡的碎片"]
+# --- 常數設定 (Constants) ---
+# 使用大寫蛇形命名法來表示常數，提高可讀性
+FRAGMENT_NAMES: List[str] = ["記憶的碎片", "時間的碎片", "靈魂的碎片", "生命的碎片", "死亡的碎片"]
 
-# 權重映射
-WEIGHT_MAP = {
+WEIGHT_MAP: Dict[str, int] = {
     "隨便用": 1,
     "不重要": 2,
     "重要": 3,
     "很重要": 4,
-    "不能用": 5
+    "不能用": 5,
 }
 
-# 這是你提供的CSV數據，作為程式內建的R卡製作數據
-# 將其儲存在一個多行字串中
-R_CARD_CSV_DATA = """
+# 內建R卡製作數據
+R_CARD_CSV_DATA: str = """
 名字,記憶的碎片,時間的碎片,靈魂的碎片,生命的碎片,死亡的碎片,已上線
 艾伯李斯特,10,10,10,10,-,是
 艾依查庫,10,15,5,-,10,是
@@ -53,7 +52,7 @@ R_CARD_CSV_DATA = """
 帕茉,15,15,5,5,-,是
 阿修羅,10,10,-,10,10,是
 佛羅倫斯,10,10,-,10,10,是
-布朗寧,20,10,-,5,5,是
+布朗NING,20,10,-,5,5,是
 瑪爾瑟斯,15,10,5,-,10,是
 路德,25,5,5,-,5,是
 魯卡,10,10,10,10,-,是
@@ -77,504 +76,394 @@ C.C.,10,15,5,-,10,是
 尤莉卡,5,10,-,10,15,否
 林奈烏斯,-,5,5,15,15,否
 娜汀,10,10,10,-,10,否
-迪諾,5,15,5,15,,否
-奧蘭,,, ,,,否
+迪諾,5,15,5,15,-,否
+奧蘭,-,-,-,-,-,否
 諾伊庫洛姆,10,10,10,10,-,否
 初葉,15,5,10,10,-,否
-希拉莉,15,10,5,10,,否
+希拉莉,15,10,5,10,-,否
 克洛維斯,10,10,10,-,10,否
 艾莉絲泰莉雅,10,10,10,10,-,否
 雨果,10,15,5,-,10,否
 艾莉亞娜,10,10,10,-,10,否
-格雷高爾,,, ,,,否
+格雷高爾,-,-,-,-,-,否
 蕾塔,5,10,15,-,10,否
 伊普西隆,15,5,10,10,-,否
 波蕾特,10,10,10,-,10,否
 尤哈尼,10,10,10,-,-,否
 諾艾菈,5,10,15,-,-,否
 勞爾,5,15,-,10,-,否
-潔米,,, ,,,否
+潔米,-,-,-,-,-,否
 瑟法斯,5,15,-,10,-,否
 維若妮卡,-,10,10,10,-,否
-里卡多,,, ,,,否
+里卡多,-,-,-,-,-,否
 """
 
-# R卡製作成本數據 (將從CSV載入)
-R_CARD_RECIPES_FULL = pd.DataFrame() # 載入所有R卡數據
-R_CARD_RECIPES_FILTERED = pd.DataFrame() # 根據使用者選擇過濾後的數據
-
-# 配置檔案名稱
-CONFIG_FILE = 'config.json'
+CONFIG_FILE = Path("unlight_config.json") # 使用Path物件
 
 class AdvancedSettingsDialog(Toplevel):
-    def __init__(self, parent, initial_selected_cards):
+    """進階設定彈出視窗，用於選擇可製作的角色。"""
+    def __init__(self, parent: tk.Tk, initial_selected_cards: List[str]):
         super().__init__(parent)
         self.parent = parent
         self.title("進階設定：選擇可製作角色")
-        # 設置視窗為模態，阻止與主視窗互動
         self.transient(parent)
         self.grab_set()
 
-        # 儲存核取方塊的狀態
-        self.checkbox_vars = {}
-        self.selected_cards_on_close = initial_selected_cards.copy() # 初始化為傳入的當前選擇
-
+        self.checkbox_vars: Dict[str, tk.BooleanVar] = {}
+        # 直接使用傳入的列表，不需複製，因為我們只在關閉時才更新父視窗的狀態
+        self.initial_selected_cards = initial_selected_cards
+        
         self.create_widgets()
+        self.center_window()
 
-        # 確保視窗在中心
-        self.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
-        self.geometry(f"+{x}+{y}")
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
 
-
-    def create_widgets(self):
-        # 標題
+    def create_widgets(self) -> None:
+        """建立視窗中的所有UI元件。"""
         ttk.Label(self, text="請勾選你擁有或可製作的R卡角色：", font=('Arial', 10, 'bold')).pack(pady=10)
 
-        # 直接使用 Frame 來包含核取方塊，並使用 grid 佈局
-        checkbox_frame = ttk.Frame(self)
-        checkbox_frame.pack(padx=10, pady=5, fill="both", expand=True)
+        main_frame = ttk.Frame(self)
+        main_frame.pack(padx=10, pady=5, fill="both", expand=True)
 
-        # 設定每行顯示的角色數量，從 3 列改為 4 列
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        checkbox_frame = ttk.Frame(canvas)
+
+        checkbox_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=checkbox_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # 填充核取方塊
+        # 從父元件(主視窗)安全地獲取R卡數據
+        r_card_recipes_full = getattr(self.parent, 'r_card_recipes_full', pd.DataFrame())
+        if r_card_recipes_full.empty:
+            ttk.Label(checkbox_frame, text="R卡數據未載入").pack()
+            return
+
         NUM_COLUMNS = 4
-        
-        # 配置列寬，讓輸入框和下拉選單更好地對齊，實現響應式佈局
         for col in range(NUM_COLUMNS):
             checkbox_frame.grid_columnconfigure(col, weight=1)
-        
-        # 填充核取方塊
-        r_card_names = R_CARD_RECIPES_FULL.index.tolist()
-        for i, r_card_name in enumerate(r_card_names):
-            row = i // NUM_COLUMNS
-            col = i % NUM_COLUMNS
-            
-            display_name = r_card_name
-            # 檢查該R卡是否為「無資料」R卡 (所有碎片消耗為0)
-            if r_card_name in R_CARD_RECIPES_FULL.index:
-                recipe_data = R_CARD_RECIPES_FULL.loc[r_card_name, FRAGMENT_NAMES]
-                # 將非數值（如'-'）轉為0，並檢查總和
-                numeric_recipe_data = pd.to_numeric(recipe_data, errors='coerce').fillna(0)
-                if numeric_recipe_data.sum() == 0:
-                    display_name += " (無資料)"
 
-            var = tk.BooleanVar(value=r_card_name in self.selected_cards_on_close)
+        r_card_names = r_card_recipes_full.index.tolist()
+        for i, r_card_name in enumerate(r_card_names):
+            row, col = divmod(i, NUM_COLUMNS)
+            
+            # 檢查是否為無資料R卡
+            recipe_data = r_card_recipes_full.loc[r_card_name, FRAGMENT_NAMES]
+            numeric_recipe_data = pd.to_numeric(recipe_data, errors='coerce').fillna(0)
+            display_name = f"{r_card_name} (無資料)" if numeric_recipe_data.sum() == 0 else r_card_name
+
+            var = tk.BooleanVar(value=(r_card_name in self.initial_selected_cards))
             cb = ttk.Checkbutton(checkbox_frame, text=display_name, variable=var)
             cb.grid(row=row, column=col, sticky="w", padx=5, pady=2)
             self.checkbox_vars[r_card_name] = var
-        
-        # 調整視窗高度以容納所有角色
-        expected_rows = math.ceil(len(r_card_names) / NUM_COLUMNS)
-        # 調整 min_height 考量 4 列和標題/按鈕高度
-        min_height = 100 + (expected_rows * 25) # 100 for title/buttons, 25 per checkbox row
-        self.geometry(f"600x{max(500, min_height)}") # 最小高度500，並調整寬度適應4列
 
         # 按鈕框架
         button_frame = ttk.Frame(self)
         button_frame.pack(pady=10)
-
         ttk.Button(button_frame, text="儲存設定", command=self.save_settings).pack(side="left", padx=5)
         ttk.Button(button_frame, text="取消", command=self.destroy).pack(side="right", padx=5)
 
-        # 設定視窗關閉時的行為
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-    
-    def save_settings(self):
-        # 收集所有被勾選的角色
-        self.selected_cards_on_close = []
-        for r_card_name, var in self.checkbox_vars.items():
-            if var.get():
-                self.selected_cards_on_close.append(r_card_name)
+    def center_window(self) -> None:
+        """將視窗置於父視窗中央。"""
+        self.update_idletasks()
+        parent_x = self.parent.winfo_x()
+        parent_y = self.parent.winfo_y()
+        parent_w = self.parent.winfo_width()
+        parent_h = self.parent.winfo_height()
         
-        # 通知父視窗更新篩選後的R卡列表，並觸發儲存
-        self.parent.update_filtered_r_cards(self.selected_cards_on_close, show_message=True)
-        self.destroy() # 關閉設定視窗
+        w = 800 # 增加寬度以容納4列
+        h = 600
+        
+        x = parent_x + (parent_w - w) // 2
+        y = parent_y + (parent_h - h) // 2
+        self.geometry(f'{w}x{h}+{x}+{y}')
+        self.minsize(w, h)
 
+    def save_settings(self) -> None:
+        """收集勾選的角色並更新父視窗。"""
+        selected_cards = [name for name, var in self.checkbox_vars.items() if var.get()]
+        # 呼叫父視窗的更新方法
+        if hasattr(self.parent, 'update_filtered_r_cards'):
+            self.parent.update_filtered_r_cards(selected_cards, show_message=True)
+        self.destroy()
 
 class ULFragmentAnalyzer(tk.Tk):
-    def __init__(self):
+    """UNLIGHT:Revive R卡碎片分析器主應用程式。"""
+    def __init__(self) -> None:
         super().__init__()
-        self.title("UNLIGHT:Revive R卡碎片分析器")
-        self.geometry("700x700") # 調整視窗大小以容納更多內容
+        self.title("UNLIGHT:Revive R卡碎片分析器 (Gemini Pro 優化版)")
+        self.geometry("750x750")
+        self.minsize(700, 700)
 
-        # 設定風格
+        # --- 狀態與資料 (封裝) ---
+        self.r_card_recipes_full: pd.DataFrame = pd.DataFrame()
+        self.r_card_recipes_filtered: pd.DataFrame = pd.DataFrame()
+        self.selected_craftable_r_cards: List[str] = []
+        
+        # --- UI 元件 ---
+        self.fragment_entries: Dict[str, ttk.Entry] = {}
+        self.fragment_weights: Dict[str, tk.StringVar] = {}
+        self.result_text: tk.Text
+
         self.style = ttk.Style(self)
-        self.style.theme_use('clam') # 'clam', 'alt', 'default', 'classic'
-
-        # 儲存目前使用者選擇的可製作R卡列表
-        self.selected_craftable_r_cards = [] 
-        # 儲存載入的碎片存量和權重，用於初始化UI
-        self._loaded_fragment_counts = {}
-        self._loaded_fragment_weights = {}
+        self.style.theme_use('clam')
 
         self.create_widgets()
-        # 載入R卡數據
-        self.load_r_card_data(R_CARD_CSV_DATA)
-        # 載入配置檔案，覆蓋預設值或CSV初始值
-        self._load_config()
+        self._load_data_and_config()
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
-        # 設定應用程式關閉時的處理
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-        messagebox.showinfo("程式啟動", "R卡製作數據與上次設定已載入，並已預設勾選'已上線'角色（若設定中無記錄）。")
-
-
-    def create_widgets(self):
+    def create_widgets(self) -> None:
+        """建立主視窗的所有UI元件。"""
         # --- 碎片輸入框架 ---
         input_frame = ttk.LabelFrame(self, text="碎片存量與權重", padding="10")
         input_frame.pack(padx=10, pady=10, fill="x")
 
-        self.fragment_entries = {}
-        self.fragment_weights = {}
-
-        # 標題行
         ttk.Label(input_frame, text="碎片名稱", font=('Arial', 10, 'bold')).grid(row=0, column=0, sticky="w", pady=2)
         ttk.Label(input_frame, text="目前存量", font=('Arial', 10, 'bold')).grid(row=0, column=1, padx=5, pady=2)
-        ttk.Label(input_frame, text="權重 (越珍貴越高)", font=('Arial', 10, 'bold')).grid(row=0, column=2, padx=5, pady=2)
+        ttk.Label(input_frame, text="重要性 (值越高越珍貴)", font=('Arial', 10, 'bold')).grid(row=0, column=2, padx=5, pady=2)
 
-        for i, name in enumerate(FRAGMENT_NAMES):
-            row = i + 1 # 從第二行開始，第一行是標題
-
-            ttk.Label(input_frame, text=f"{name}:").grid(row=row, column=0, sticky="w", pady=2)
-
-            # 存量輸入框
+        for i, name in enumerate(FRAGMENT_NAMES, start=1):
+            ttk.Label(input_frame, text=f"{name}:").grid(row=i, column=0, sticky="w", pady=2)
             entry = ttk.Entry(input_frame, width=10)
-            entry.grid(row=row, column=1, padx=5, pady=2)
-            # 嘗試從載入的配置中設定預設值，否則設為0
-            entry.insert(0, str(self._loaded_fragment_counts.get(name, 0))) 
+            entry.grid(row=i, column=1, padx=5, pady=2)
             self.fragment_entries[name] = entry
 
-            # 權重選擇下拉選單
-            weight_var = tk.StringVar(self)
-            # 嘗試從載入的配置中設定預設值，否則設為"重要"
-            initial_weight_key = self._loaded_fragment_weights.get(name, "重要")
-            weight_var.set(initial_weight_key) 
-            weight_dropdown = ttk.Combobox(input_frame, textvariable=weight_var,
-                                            values=list(WEIGHT_MAP.keys()), state="readonly", width=12)
-            weight_dropdown.grid(row=row, column=2, padx=5, pady=2)
+            weight_var = tk.StringVar(self, value="重要")
+            weight_dropdown = ttk.Combobox(input_frame, textvariable=weight_var, values=list(WEIGHT_MAP.keys()), state="readonly", width=12)
+            weight_dropdown.grid(row=i, column=2, padx=5, pady=2)
             self.fragment_weights[name] = weight_var
-            
-        # 配置列寬，讓輸入框和下拉選單更好地對齊
-        input_frame.grid_columnconfigure(0, weight=1)
-        input_frame.grid_columnconfigure(1, weight=1)
-        input_frame.grid_columnconfigure(2, weight=1)
 
-        # --- 按鈕框架 (分析 & 進階設定) ---
+        for col in range(3):
+            input_frame.grid_columnconfigure(col, weight=1)
+
+        # --- 按鈕框架 ---
         button_container = ttk.Frame(self)
         button_container.pack(pady=10)
-
-        analyze_button = ttk.Button(button_container, text="分析最佳製作方案 (製作3張R卡)", command=self.analyze_fragments)
-        analyze_button.pack(side="left", padx=5)
-
-        settings_button = ttk.Button(button_container, text="進階設定：可製作角色", command=self.open_advanced_settings)
-        settings_button.pack(side="right", padx=5)
+        ttk.Button(button_container, text="分析最佳製作方案 (3張R卡)", command=self.run_analysis).pack(side="left", padx=5)
+        ttk.Button(button_container, text="進階設定：可製作角色", command=self.open_advanced_settings).pack(side="right", padx=5)
 
         # --- 結果顯示區 ---
         result_frame = ttk.LabelFrame(self, text="分析結果", padding="10")
         result_frame.pack(padx=10, pady=10, fill="both", expand=True)
-
-        self.result_text = tk.Text(result_frame, wrap="word", height=15, width=80, font=('Arial', 10))
-        self.result_text.pack(side="left", expand=True, fill="both") # 滾動條修正點1
-
-        # 滾動條修正點2: 滾動條依附於 result_frame
+        self.result_text = tk.Text(result_frame, wrap="word", height=15, width=80, font=('Consolas', 10)) # 使用等寬字體
         scrollbar = ttk.Scrollbar(result_frame, command=self.result_text.yview)
         self.result_text.config(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y") # 滾動條修正點3
+        self.result_text.pack(side="left", expand=True, fill="both")
+        scrollbar.pack(side="right", fill="y")
+        
+    def _load_data_and_config(self) -> None:
+        """統一個函式處理資料和設定的載入流程"""
+        # 1. 載入內建的R卡CSV數據
+        self._load_r_card_data_from_string(R_CARD_CSV_DATA)
+        
+        # 2. 載入使用者設定檔(如果存在)，這會覆蓋CSV中的預設值
+        self._load_config()
 
-    def _save_config(self):
-        """將當前碎片數量、權重和選擇的角色儲存到配置檔案"""
-        config_data = {}
-        # 儲存碎片數量
-        current_fragments = {}
-        for name in FRAGMENT_NAMES:
-            try:
-                current_fragments[name] = int(self.fragment_entries[name].get())
-            except ValueError:
-                current_fragments[name] = 0 # 避免錯誤輸入導致儲存失敗
-        config_data['fragment_counts'] = current_fragments
+        messagebox.showinfo("程式啟動", "R卡製作數據與上次設定已載入。")
 
-        # 儲存碎片權重
-        current_weights = {}
-        for name in FRAGMENT_NAMES:
-            current_weights[name] = self.fragment_weights[name].get()
-        config_data['fragment_weights'] = current_weights
-
-        # 儲存已選擇的角色
-        config_data['selected_r_cards'] = self.selected_craftable_r_cards
-
+    def _load_r_card_data_from_string(self, csv_content: str) -> None:
+        """從字串載入R卡製作配方到 self.r_card_recipes_full。"""
         try:
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=4)
-            # print("設定已成功儲存。")
+            df = pd.read_csv(StringIO(csv_content))
+            df = df.replace('-', 0).fillna(0)
+            
+            for frag_name in FRAGMENT_NAMES:
+                df[frag_name] = pd.to_numeric(df[frag_name], errors='coerce').fillna(0).astype(int)
+
+            if '名字' not in df.columns:
+                raise ValueError("CSV中缺少R卡名稱欄位 '名字'。")
+            
+            self.r_card_recipes_full = df.set_index('名字')
+            
+            # 預設選擇"已上線"的角色，如果設定檔沒有紀錄的話
+            if '已上線' in self.r_card_recipes_full.columns:
+                default_online_cards = self.r_card_recipes_full[self.r_card_recipes_full['已上線'] == '是'].index.tolist()
+                self.update_filtered_r_cards(default_online_cards, show_message=False)
+            else:
+                self.update_filtered_r_cards(self.r_card_recipes_full.index.tolist(), show_message=False)
+                
         except Exception as e:
-            print(f"儲存設定時發生錯誤: {e}")
-            messagebox.showerror("儲存錯誤", f"無法儲存設定：\n{e}")
+            messagebox.showerror("數據載入錯誤", f"載入內建CSV時發生嚴重錯誤：\n{e}\n程式可能無法正常運作。")
+            self.r_card_recipes_full = pd.DataFrame() # 發生錯誤時清空
 
-    def _load_config(self):
-        """從配置檔案載入碎片數量、權重和選擇的角色"""
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                    config_data = json.load(f)
-                
-                # 載入碎片數量
-                self._loaded_fragment_counts = config_data.get('fragment_counts', {})
-                for name, entry in self.fragment_entries.items():
-                    entry.delete(0, tk.END)
-                    entry.insert(0, str(self._loaded_fragment_counts.get(name, 0)))
+    def _load_config(self) -> None:
+        """從JSON設定檔載入使用者設定。"""
+        if not CONFIG_FILE.exists():
+            print("未找到設定檔，將使用預設設定。")
+            return
+            
+        try:
+            with CONFIG_FILE.open('r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            
+            # 載入碎片數量
+            counts = config_data.get('fragment_counts', {})
+            for name, entry in self.fragment_entries.items():
+                entry.delete(0, tk.END)
+                entry.insert(0, str(counts.get(name, 0)))
 
-                # 載入碎片權重
-                self._loaded_fragment_weights = config_data.get('fragment_weights', {})
-                for name, var in self.fragment_weights.items():
-                    # 確保載入的權重值存在於 WEIGHT_MAP 的鍵中
-                    if self._loaded_fragment_weights.get(name) in WEIGHT_MAP:
-                        var.set(self._loaded_fragment_weights.get(name))
-                    else:
-                        var.set("重要") # 載入無效值時使用預設
+            # 載入碎片權重
+            weights = config_data.get('fragment_weights', {})
+            for name, var in self.fragment_weights.items():
+                if weights.get(name) in WEIGHT_MAP:
+                    var.set(weights.get(name))
 
-                # 載入已選擇的角色
-                loaded_selected_cards = config_data.get('selected_r_cards', [])
-                if loaded_selected_cards: # 如果配置檔案中有記錄，則使用記錄
-                    # 篩選掉CSV中不存在的角色名，避免錯誤
-                    valid_selected_cards = [
-                        card for card in loaded_selected_cards if card in R_CARD_RECIPES_FULL.index
-                    ]
-                    self.selected_craftable_r_cards = valid_selected_cards
-                    # 更新篩選後的R卡數據，不顯示提示訊息
-                    self.update_filtered_r_cards(self.selected_craftable_r_cards, show_message=False)
-                else: # 如果配置檔案中沒有記錄，則使用CSV的'已上線'預設值
-                    # load_r_card_data 已經初始化了 self.selected_craftable_r_cards
-                    # 這裡只需確保 R_CARD_RECIPES_FILTERED 是正確的
-                    self.update_filtered_r_cards(self.selected_craftable_r_cards, show_message=False)
-                
-                # print("設定已成功載入。")
+            # 載入已選擇的角色
+            loaded_cards = config_data.get('selected_r_cards', [])
+            if loaded_cards:
+                valid_cards = [card for card in loaded_cards if card in self.r_card_recipes_full.index]
+                self.update_filtered_r_cards(valid_cards, show_message=False)
 
-            except json.JSONDecodeError:
-                print("配置檔案損壞或格式不正確，將使用預設設定。")
-                messagebox.showwarning("載入錯誤", "配置檔案損壞或格式不正確，將使用預設設定。")
-                self._reset_default_settings_from_csv() # 重新從CSV預設值初始化
-            except Exception as e:
-                print(f"載入設定時發生錯誤: {e}，將使用預設設定。")
-                messagebox.showwarning("載入錯誤", f"載入設定時發生錯誤：\n{e}\n將使用預設設定。")
-                self._reset_default_settings_from_csv() # 重新從CSV預設值初始化
-        else:
-            print("未找到配置檔案，將使用預設設定。")
-            # 第一次運行時，selected_craftable_r_cards 已經由 load_r_card_data 初始化為 '已上線' 角色
-            # 這裡只需確保 R_CARD_RECIPES_FILTERED 是正確的
-            self.update_filtered_r_cards(self.selected_craftable_r_cards, show_message=False)
-    
-    def _reset_default_settings_from_csv(self):
-        """當配置檔案載入失敗時，將設定重設為從CSV中讀取的預設值"""
-        # 重設碎片數量為0
-        for name, entry in self.fragment_entries.items():
-            entry.delete(0, tk.END)
-            entry.insert(0, "0")
-        # 重設碎片權重為「重要」
-        for name, var in self.fragment_weights.items():
-            var.set("重要")
-        # 重設可製作角色為CSV中的「已上線」角色
-        if '已上線' in R_CARD_RECIPES_FULL.columns:
-            self.selected_craftable_r_cards = R_CARD_RECIPES_FULL[R_CARD_RECIPES_FULL['已上線'] == '是'].index.tolist()
-        else:
-            self.selected_craftable_r_cards = R_CARD_RECIPES_FULL.index.tolist()
-        self.update_filtered_r_cards(self.selected_craftable_r_cards, show_message=False)
+        except (json.JSONDecodeError, TypeError) as e:
+            messagebox.showwarning("設定檔錯誤", f"設定檔 '{CONFIG_FILE}' 損毀或格式不正確，將使用預設值。\n錯誤: {e}")
+        except Exception as e:
+            messagebox.showerror("載入錯誤", f"載入設定檔時發生未知錯誤：\n{e}")
 
+    def _save_config(self) -> None:
+        """將當前設定儲存到JSON檔案。"""
+        config_data = {
+            'fragment_counts': {name: entry.get() for name, entry in self.fragment_entries.items()},
+            'fragment_weights': {name: var.get() for name, var in self.fragment_weights.items()},
+            'selected_r_cards': self.selected_craftable_r_cards
+        }
+        try:
+            with CONFIG_FILE.open('w', encoding='utf-8') as f:
+                json.dump(config_data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            messagebox.showerror("儲存錯誤", f"無法儲存設定檔：\n{e}")
 
-    def on_closing(self):
-        """應用程式關閉時的處理，儲存設定並銷毀視窗"""
+    def _on_closing(self) -> None:
+        """應用程式關閉時，儲存設定並銷毀視窗。"""
         self._save_config()
         self.destroy()
 
-
-    def load_r_card_data(self, csv_content):
-        """
-        從提供的CSV內容載入R卡製作配方。
-        CSV應包含'名字'（R卡名稱）以及五種碎片欄位。
-        """
-        global R_CARD_RECIPES_FULL
-        try:
-            csv_file = StringIO(csv_content)
-            df = pd.read_csv(csv_file)
-            
-            # 填充所有NaN（空白格）為0，並將'-'替換為0
-            df = df.replace('-', 0)
-            df = df.fillna(0) 
-
-            # 確保碎片欄位是數值類型
-            for frag_name in FRAGMENT_NAMES:
-                if frag_name in df.columns:
-                    df[frag_name] = pd.to_numeric(df[frag_name], errors='coerce').fillna(0).astype(int)
-                else:
-                    messagebox.showwarning("CSV錯誤", f"CSV中缺少碎片欄位: '{frag_name}'。請檢查CSV標頭。")
-                    return # 如果缺少關鍵碎片欄位，則無法繼續
-
-            # 將'名字'欄位設為索引
-            if '名字' in df.columns:
-                R_CARD_RECIPES_FULL = df.set_index('名字')
-                
-                # 初始化 self.selected_craftable_r_cards 根據 '已上線' 欄位
-                # 此處設定為預設值，如果配置檔案存在會覆寫
-                if '已上線' in R_CARD_RECIPES_FULL.columns:
-                    self.selected_craftable_r_cards = R_CARD_RECIPES_FULL[R_CARD_RECIPES_FULL['已上線'] == '是'].index.tolist()
-                    # R_CARD_RECIPES_FULL = R_CARD_RECIPES_FULL.drop(columns=['已上線']) # 移除此欄位，分析時不需用
-                else:
-                    # 如果沒有 '已上線' 欄位，預設所有R卡都可製作
-                    self.selected_craftable_r_cards = R_CARD_RECIPES_FULL.index.tolist()
-
-                # 初始化過濾後的R卡數據，此處不顯示messagebox
-                # update_filtered_r_cards 會在 _load_config 中被呼叫，確保順序
-                # self.update_filtered_r_cards(self.selected_craftable_r_cards, show_message=False)
-
-            else:
-                messagebox.showerror("CSV錯誤", "CSV中缺少R卡名稱欄位 '名字'。")
-                return
-
-        except Exception as e:
-            messagebox.showerror("數據載入錯誤", f"載入CSV時發生錯誤：\n{e}\n請檢查CSV格式是否正確。")
-            print(f"錯誤：{e}")
-
-
-    def open_advanced_settings(self):
-        """開啟進階設定視窗讓使用者選擇可製作角色"""
-        # 傳遞當前選擇的角色列表
+    def open_advanced_settings(self) -> None:
+        """開啟進階設定視窗。"""
         dialog = AdvancedSettingsDialog(self, self.selected_craftable_r_cards)
-        self.wait_window(dialog) # 等待設定視窗關閉
+        self.wait_window(dialog)
 
-    def update_filtered_r_cards(self, new_selected_cards, show_message=True):
-        """根據使用者在進階設定中的選擇來更新R卡列表，並觸發設定儲存"""
-        global R_CARD_RECIPES_FILTERED
+    def update_filtered_r_cards(self, new_selected_cards: List[str], show_message: bool = True) -> None:
+        """根據選擇更新可用的R卡列表。"""
         self.selected_craftable_r_cards = new_selected_cards
         
-        if not R_CARD_RECIPES_FULL.empty and self.selected_craftable_r_cards:
-            # 從完整的數據中篩選出使用者選擇的角色
-            R_CARD_RECIPES_FILTERED = R_CARD_RECIPES_FULL.loc[self.selected_craftable_r_cards]
+        if not self.r_card_recipes_full.empty and self.selected_craftable_r_cards:
+            self.r_card_recipes_filtered = self.r_card_recipes_full.loc[self.selected_craftable_r_cards]
         else:
-            R_CARD_RECIPES_FILTERED = pd.DataFrame() # 如果沒有選擇任何卡片或數據未載入，則為空DataFrame
+            self.r_card_recipes_filtered = pd.DataFrame()
 
-        if show_message: # 根據參數決定是否顯示訊息框
-            messagebox.showinfo("設定更新", f"已更新可製作角色列表，共 {len(self.selected_craftable_r_cards)} 個角色。")
+        if show_message:
+            messagebox.showinfo("設定更新", f"已更新可製作角色列表，共 {len(self.selected_craftable_r_cards)} 個角色。設定已自動儲存。")
         
-        # 每次更新篩選列表後都儲存設定
+        # 每次更新都儲存一次設定
         self._save_config()
 
-
-    def analyze_fragments(self):
-        self.result_text.delete('1.0', tk.END) # 清空之前的結果
-
-        # 1. 取得使用者輸入
-        current_fragments = {}
-        fragment_weights_val = {} # 轉換成數值權重
+    def _get_user_inputs(self) -> Optional[Tuple[Dict[str, int], Dict[str, int]]]:
+        """從UI獲取並驗證使用者輸入的碎片數量和權重。"""
         try:
-            for name in FRAGMENT_NAMES:
-                count_str = self.fragment_entries[name].get()
-                count = int(count_str)
-                if count < 0:
-                    raise ValueError("碎片存量不能為負數。")
-                current_fragments[name] = count
-
-                weight_text = self.fragment_weights[name].get()
-                fragment_weights_val[name] = WEIGHT_MAP[weight_text]
-        except ValueError as e:
-            messagebox.showerror("輸入錯誤", f"請確認所有碎片存量都輸入了有效的數字。\n錯誤: {e}")
-            return
-        except Exception as e:
-            messagebox.showerror("輸入錯誤", f"獲取輸入時發生未知錯誤：{e}")
-            return
-        
-        # 保存當前輸入的碎片數量和權重
-        self._save_config()
-
-        if R_CARD_RECIPES_FULL.empty:
-            messagebox.showwarning("數據缺失", "R卡製作數據尚未載入。")
-            return
+            current_fragments = {name: int(self.fragment_entries[name].get()) for name in FRAGMENT_NAMES}
+            if any(v < 0 for v in current_fragments.values()):
+                raise ValueError("碎片存量不能為負數。")
             
-        if R_CARD_RECIPES_FILTERED.empty:
+            fragment_weights_val = {name: WEIGHT_MAP[self.fragment_weights[name].get()] for name in FRAGMENT_NAMES}
+            return current_fragments, fragment_weights_val
+        except (ValueError, KeyError) as e:
+            messagebox.showerror("輸入錯誤", f"請檢查所有輸入是否正確。\n錯誤: {e}")
+            return None
+
+    def _find_best_combination(self, available_cards: List[str], current_fragments: Dict[str, int], weights: Dict[str, int]) -> Optional[Dict[str, Any]]:
+        """核心演算法：尋找成本最低的R卡組合。"""
+        best_combo = None
+        min_weighted_cost = float('inf')
+        
+        for combo in itertools.combinations(available_cards, 3):
+            total_needed = {name: 0 for name in FRAGMENT_NAMES}
+            for card_name in combo:
+                for frag_name in FRAGMENT_NAMES:
+                    total_needed[frag_name] += self.r_card_recipes_filtered.loc[card_name, frag_name]
+
+            if all(current_fragments[name] >= total_needed[name] for name in FRAGMENT_NAMES):
+                # 組合可行，計算成本
+                cost = sum(total_needed[name] * weights[name] for name in FRAGMENT_NAMES)
+                if cost < min_weighted_cost:
+                    min_weighted_cost = cost
+                    best_combo = {
+                        "combination": combo,
+                        "cost": cost,
+                        "total_needed": total_needed,
+                        "fragments_left": {name: current_fragments[name] - total_needed[name] for name in FRAGMENT_NAMES}
+                    }
+        return best_combo
+
+    def _format_results(self, best_result: Dict[str, Any]) -> str:
+        """將分析結果格式化為易於閱讀的字串。"""
+        output = []
+        output.append(f"--- 最佳R卡製作方案 ---\n")
+        output.append(f"總加權消耗 (越低越好): {best_result['cost']}\n")
+        output.append("建議製作以下三張R卡：")
+        
+        for r_card_name in best_result['combination']:
+            output.append(f"\n- 角色：{r_card_name}")
+            output.append("  所需碎片：")
+            recipe = self.r_card_recipes_filtered.loc[r_card_name]
+            for frag_name in FRAGMENT_NAMES:
+                if (consumed := recipe.get(frag_name, 0)) > 0:
+                    output.append(f"    {frag_name:<6}: {consumed:>3}")
+
+        output.append("\n--- 製作總消耗與剩餘量 ---")
+        header = f"{'碎片名稱':<8} {'目前':>5} {'消耗':>5} {'剩餘':>5}"
+        output.append(header)
+        output.append("-" * len(header))
+        
+        for name in FRAGMENT_NAMES:
+            current = self.fragment_entries[name].get()
+            consumed = best_result['total_needed'][name]
+            left = best_result['fragments_left'][name]
+            output.append(f"{name:<7} {current:>5} {consumed:>5} {left:>5}")
+            
+        return "\n".join(output)
+
+    def run_analysis(self) -> None:
+        """執行完整分析流程的控制器。"""
+        self.result_text.delete('1.0', tk.END)
+
+        if self.r_card_recipes_filtered.empty:
             self.result_text.insert(tk.END, "目前沒有可製作的R卡角色被選取。\n請進入'進階設定'勾選希望考量的角色。")
             return
 
-        # 2. 核心分析邏輯
-        best_combination = None
-        min_weighted_cost = float('inf') # 初始化為無限大
-        
-        # 儲存最佳組合製作後的碎片剩餘量
-        best_combo_fragments_left = {} 
-
-        # 取得篩選後的可製作R卡的名稱列表
-        available_r_cards = R_CARD_RECIPES_FILTERED.index.tolist()
-
-        if len(available_r_cards) < 3:
-            self.result_text.insert(tk.END, f"目前僅有 {len(available_r_cards)} 種R卡在考量範圍內，無法製作3張R卡。\n請進入'進階設定'勾選更多角色。")
+        if len(self.r_card_recipes_filtered) < 3:
+            self.result_text.insert(tk.END, f"考量範圍內的角色不足3個 ({len(self.r_card_recipes_filtered)}個)，無法分析。\n請進入'進階設定'勾選更多角色。")
             return
 
-        # 產生所有製作3張R卡的組合
-        for r_card_combo in itertools.combinations(available_r_cards, 3):
-            temp_fragments_needed = {name: 0 for name in FRAGMENT_NAMES}
-            current_combo_weighted_cost = 0
-            is_possible = True
+        inputs = self._get_user_inputs()
+        if inputs is None:
+            return # 輸入有誤，已彈出提示
 
-            # 計算這個組合總共需要的碎片
-            for r_card_name in r_card_combo:
-                # 確保 recipe_data 僅包含 FRAGMENT_NAMES 中的列
-                recipe = R_CARD_RECIPES_FILTERED.loc[r_card_name]
-                for frag_name in FRAGMENT_NAMES:
-                    # 使用 .get() 並提供預設值 0，處理數據中可能缺失的碎片列
-                    needed = recipe.get(frag_name, 0)
-                    temp_fragments_needed[frag_name] += needed
+        current_fragments, fragment_weights = inputs
+        available_cards = self.r_card_recipes_filtered.index.tolist()
+        
+        best_result = self._find_best_combination(available_cards, current_fragments, fragment_weights)
 
-            # 檢查當前碎片是否足夠，並計算加權成本
-            temp_fragments_left = current_fragments.copy() # 複製一份用於模擬消耗
-            for frag_name in FRAGMENT_NAMES:
-                needed = temp_fragments_needed[frag_name]
-                if temp_fragments_left[frag_name] < needed:
-                    is_possible = False
-                    break # 碎片不足，這個組合不可行
-
-                # 模擬消耗碎片
-                temp_fragments_left[frag_name] -= needed
-                
-                # 計算加權成本 (只計算實際消耗的碎片的加權成本)
-                current_combo_weighted_cost += needed * fragment_weights_val[frag_name]
-
-            if is_possible:
-                if current_combo_weighted_cost < min_weighted_cost:
-                    min_weighted_cost = current_combo_weighted_cost
-                    best_combination = r_card_combo
-                    best_combo_fragments_left = temp_fragments_left.copy() # 儲存此時的剩餘碎片
-
-        # 3. 顯示結果
-        if best_combination:
-            output = f"--- 最佳R卡製作方案 ---\n"
-            output += f"總加權消耗 (越低越好): {min_weighted_cost}\n"
-            output += "建議製作以下三張R卡：\n"
-            
-            total_consumed_fragments = {name: 0 for name in FRAGMENT_NAMES}
-
-            for r_card_name in best_combination:
-                output += f"\n- 角色：{r_card_name}\n"
-                output += "  所需碎片：\n"
-                recipe = R_CARD_RECIPES_FILTERED.loc[r_card_name]
-                for frag_name in FRAGMENT_NAMES:
-                    consumed = recipe.get(frag_name, 0) # 使用 .get()
-                    if consumed > 0:
-                        output += f"    {frag_name}: {consumed}\n"
-                        total_consumed_fragments[frag_name] += consumed
-
-            output += "\n--- 製作總消耗碎片 ---\n"
-            for frag_name in FRAGMENT_NAMES:
-                if total_consumed_fragments[frag_name] > 0:
-                    output += f"- {frag_name}: {total_consumed_fragments[frag_name]}\n"
-            
-            output += "\n--- 製作後碎片剩餘量 ---\n"
-            # 這裡使用 best_combo_fragments_left，它已經是準確的剩餘量
-            for frag_name in FRAGMENT_NAMES:
-                output += f"- {frag_name}: {best_combo_fragments_left[frag_name]}\n"
-
-            self.result_text.insert(tk.END, output)
+        if best_result:
+            result_string = self._format_results(best_result)
+            self.result_text.insert(tk.END, result_string)
         else:
-            self.result_text.insert(tk.END, "抱歉，沒有找到符合條件的最佳R卡製作方案。\n可能原因：\n- 碎片存量不足以製作任何三張R卡組合。\n- 權重設定過高，導致沒有符合成本效益的組合。\n- 所選可製作角色數量不足3個。\n\n請檢查碎片存量、調整權重，或進入'進階設定'勾選更多角色。")
+            self.result_text.insert(tk.END, "抱歉，根據您目前的碎片存量，找不到可以一次製作三張R卡的組合。\n\n"
+                                          "可能原因：\n"
+                                          "- 碎片存量不足。\n"
+                                          "- 可選角色太少，請至'進階設定'檢查。\n")
+        
+        # 每次分析完自動儲存輸入的碎片數量
+        self._save_config()
 
-
-def main():
+def main() -> None:
     app = ULFragmentAnalyzer()
     app.mainloop()
 
