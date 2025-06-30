@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UNLIGHT:Revive R卡碎片分析器 (網頁版)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>UNLIGHT:Revive R卡碎片分析器</h1>
+        <p>由 Gemini Pro 優化的網頁版本</p>
+    </header>
+
+    <main>
+        <section class="card">
+            <h2>碎片存量與重要性</h2>
+            <form id="fragment-form">
+                <div class="form-grid" id="input-grid">
+                    <!-- JS 會在這裡動態生成輸入欄位 -->
+                </div>
+            </form>
+        </section>
+
+        <section class="controls">
+            <button id="analyze-button" class="button-primary">分析最佳製作方案 (3張R卡)</button>
+            <button id="settings-button">進階設定：可製作角色</button>
+        </section>
+
+        <section class="card">
+            <h2>分析結果</h2>
+            <pre id="result-text">請輸入您的碎片存量，然後點擊分析按鈕。</pre>
+        </section>
+    </main>
+
+    <footer>
+        <p>此工具的設定會自動儲存在您的瀏覽器中。</p>
+    </footer>
+
+    <!-- 進階設定 Modal Dialog -->
+    <div id="settings-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>進階設定：選擇可製作角色</h2>
+                <button id="close-modal-button" class="close-button">&times;</button>
+            </div>
+            <div class="modal-body" id="card-selection-grid">
+                <!-- JS 會在這裡動態生成角色核取方塊 -->
+            </div>
+            <div class="modal-footer">
+                <button id="save-settings-button" class="button-primary">儲存設定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
